@@ -1,0 +1,19 @@
+site_name: "Projet ROK4 - Outils python"
+site_url: https://rok4.github.io/pytools
+
+nav:
+    - Projet ROK4: https://rok4.github.io
+    - Accueil: index.md
+    - Toutes les versions: versions.md
+
+theme:
+    logo: https://rok4.github.io/assets/images/rok4-carre.png
+    favicon: https://rok4.github.io/assets/images/rok4-carre.png
+    name: material
+    features:
+        - navigation.tabs
+        - navigation.tabs.sticky
+    locale: fr
+
+extra_css:
+    - assets/css/style.css
