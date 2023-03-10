@@ -29,6 +29,7 @@ jobs:
       - name: Run mkdocs and archive
         run : |
           mkdocs build
+          ln -s site/versions/$(ls -t site/versions/| head -n 1) site/versions/latest
           tar \
             --dereference --hard-dereference \
             --directory "site" \
