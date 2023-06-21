@@ -35,6 +35,15 @@ dependencies = [
   "rok4 >= 1.4.4"
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest >= 7.1.2",
+  "coverage >= 7.0.5"
+]
+doc = [
+  "pdoc3 >= 0.10.0"
+]
+
 [project.urls]
 "Homepage" = "https://rok4.github.io/documentation/pytools"
 "Bug Reports" = "https://github.com/rok4/pytools/issues"
