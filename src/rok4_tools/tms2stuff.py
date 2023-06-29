@@ -1,8 +1,8 @@
 import argparse
-import importlib.metadata
+from importlib.metadata import version
 import sys
 
-__version__ = importlib.metadata.version("rok4-tools")
+__version__ = version("rok4-tools")
 
 def main():
 
@@ -14,6 +14,12 @@ def main():
                         help="Prints the version then exits")
     parser.add_argument("--tms", required=True, help="Path to a TMS file.",
                         dest="tms_path")
+    parser.add_argument("--from", required=True, help="Input to convert.",
+                        dest="input")
+    parser.add_argument("--to", required=True, help="Output format.",
+                        dest="output")
+    parser.add_argument("--level", required=False, help="TMS level, or TM id.",
+                        dest="level")
     args = parser.parse_args()
 
     sys.exit(0)

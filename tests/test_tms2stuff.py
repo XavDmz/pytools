@@ -4,7 +4,7 @@ There is one test class for each tested functionnality.
 See internal docstrings for more information.
 Each variable prefixed by "m_" is a mock, or part of it.
 """
-
+from io import StringIO
 import math
 import pytest
 import sys
@@ -14,12 +14,28 @@ from unittest.mock import call, MagicMock, Mock, mock_open, patch
 from rok4_tools.tms2stuff import main
 
 class TestMain(TestCase):
-    """Test CLI calls to the tool's executable."""
+    """Test generic CLI calls to the tool's executable."""
+
+    def test_help(self):
+        m_argv = [
+            "rok4_tools/tms2stuff.py",
+            "-h",
+        ]
+        m_stdout = StringIO()
+
+        with patch("sys.argv", m_argv), patch("sys.stdout", m_stdout), \
+                self.assertRaises(SystemExit) as cm:
+            main()
+        
+        self.assertEqual(cm.exception.code, 0,
+            msg="Executable's exit code was not from 0.")
+        self.assertRegex(m_stdout.getvalue(), "^usage:")
 
 
-    @patch("rok4_tools.tms2stuff.bbox_to_tile")
-    @patch("sys.exit")
-    def test_bbox_to_tile(self, m_exit, m_conversion):
+class TestBBoxToGetTile(TestCase):
+    """Test conversion from BBOX to GetTile parameters"""
+
+    def test_bbox_to_tile(self):
         m_argv = [
             "rok4_tools/tms2stuff.py",
             "--tms", "PM",
@@ -28,12 +44,10 @@ class TestMain(TestCase):
             "--to", "GETTILE_PARAMS",
         ]
 
-        with patch("sys.argv", m_argv):
+        with patch("sys.argv", m_argv), \
+                self.assertRaises(SystemExit) as cm:
             main()
-
         
-        m_exit.assert_called_once_with(0)
-
-class TestBBoxToGetTile(TestCase):
-    """Test conversion from BBOX to GetTile parameters"""
+        self.assertEqual(cm.exception.code, 0,
+            msg="Executable's exit code was not from 0.")
 
