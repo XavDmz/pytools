@@ -5,13 +5,14 @@ See internal docstrings for more information.
 Each variable prefixed by "m_" is a mock, or part of it.
 """
 from io import StringIO
-import math
-import pytest
+import json
+import re
+import os
 import sys
 from unittest import mock, TestCase
 from unittest.mock import call, MagicMock, Mock, mock_open, patch
 
-from rok4_tools.tms2stuff import main
+from rok4_tools import tms2stuff
 
 class TestGenericOptions(TestCase):
     """Test generic CLI calls to the tool's executable."""
@@ -27,8 +28,8 @@ class TestGenericOptions(TestCase):
             m_stdout = StringIO()
             with patch("sys.argv", args), patch("sys.stdout", m_stdout), \
                     self.assertRaises(SystemExit) as cm:
-                main()
-            
+                tms2stuff.main()
+
             self.assertEqual(cm.exception.code, 0,
                 msg=f"exit code should be 0 (option '{args[1]}')")
             stdout_content = m_stdout.getvalue()
@@ -43,8 +44,8 @@ class TestGenericOptions(TestCase):
 
         with patch("sys.argv", m_argv), patch("sys.stdout", m_stdout), \
                 self.assertRaises(SystemExit) as cm:
-            main()
-        
+            tms2stuff.main()
+
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         stdout_content = m_stdout.getvalue()
         self.assertRegex(stdout_content, "^[0-9]+[.][0-9]+[.][0-9]+")
@@ -54,20 +55,107 @@ class TestBBoxToGetTile(TestCase):
     """Test conversion from BBOX to GetTile parameters"""
 
     def test_bbox_to_tile(self):
+        m_tms_dir = "/opt/tile_matrix_set"
+        m_env = {
+            "ROK4_TMS_DIRECTORY": m_tms_dir
+        }
+        level_id = "15"
         m_argv = [
             "rok4_tools/tms2stuff.py",
             "PM",
-            "BBOX:-5990500.00,487500.00,5822500.00,642500.00",
+            "BBOX:753363.55,1688952.65,757025.90,1692621.45",
             "GETTILE_PARAMS",
-            "--level", "15",
+            "--level", level_id,
         ]
         m_stdout = StringIO()
+        m_tms_def = {
+           "tileMatrices" : [
+              {
+                 "id" : "14",
+                 "cellSize" : 9.55462853564703,
+                 "matrixHeight" : 16384,
+                 "pointOfOrigin" : [
+                    -20037508.3427892,
+                    20037508.3427892
+                 ],
+                 "tileHeight" : 256,
+                 "tileWidth" : 256,
+                 "scaleDenominator" : 34123.6733415965,
+                 "matrixWidth" : 16384
+              },
+              {
+                 "tileWidth" : 256,
+                 "scaleDenominator" : 17061.8366707983,
+                 "matrixWidth" : 32768,
+                 "cellSize" : 4.77731426782352,
+                 "matrixHeight" : 32768,
+                 "tileHeight" : 256,
+                 "pointOfOrigin" : [
+                    -20037508.3427892,
+                    20037508.3427892
+                 ],
+                 "id" : "15"
+              },
+              {
+                 "tileHeight" : 256,
+                 "pointOfOrigin" : [
+                    -20037508.3427892,
+                    20037508.3427892
+                 ],
+                 "matrixHeight" : 65536,
+                 "cellSize" : 2.38865713391176,
+                 "matrixWidth" : 65536,
+                 "scaleDenominator" : 8530.91833539914,
+                 "tileWidth" : 256,
+                 "id" : "16"
+              }
+           ],
+           "crs" : "EPSG:3857",
+           "orderedAxes" : [
+              "X",
+              "Y"
+           ],
+           "id" : "PM"
+        }
+
+
+        m_open = mock_open(read_data=json.dumps(m_tms_def))
 
         with patch("sys.argv", m_argv), patch("sys.stdout", m_stdout), \
+                patch("os.environ", m_env), patch("builtins.open", m_open), \
                 self.assertRaises(SystemExit) as cm:
-            main()
-        
+            tms2stuff.main()
+
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
+        m_open.assert_called_once_with(f"{m_tms_dir}/PM.json", "r")
         stdout_content = m_stdout.getvalue()
-        self.assertRegex(stdout_content, "^TILEMATRIX=[0-9A-Za-z_-]+&TILECOL=[0-9]+&TILEROW=[0-9]+$")
+        match_list = []
+        expected_match_list = [
+            (17000, 15000),
+            (17001, 15000),
+            (17002, 15000),
+            (17000, 15001),
+            (17001, 15001),
+            (17002, 15001),
+            (17000, 15002),
+            (17001, 15002),
+            (17002, 15002),
+            None
+        ]
+        pattern = f"^TILEMATRIX={level_id}&TILECOL=([0-9]+)&TILEROW=([0-9]+)$"
+        for stdout_line in stdout_content.split("\n"):
+            line_match = re.match(pattern, stdout_line)
+            if line_match is not None:
+                match_list.append(line_match.group(1,2))
+            else:
+                match_list.append(None)
+        self.assertEqual(match_list, expected_match_list,
+            "unexpected console output")
+
+        match_list = re.finditer(
+            f"^TILEMATRIX={level_id}&TILECOL=([0-9]+)&TILEROW=([0-9]+)$",
+            stdout_content
+        )
+        self.assertRegex(stdout_content[0],
+            f"^TILEMATRIX={level_id}&TILECOL=[0-9]+&TILEROW=[0-9]+$")
 
