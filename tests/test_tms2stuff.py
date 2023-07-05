@@ -54,7 +54,10 @@ class TestGenericOptions(TestCase):
 class TestBBoxToGetTile(TestCase):
     """Test conversion from BBOX to GetTile parameters"""
 
-    def test_bbox_to_tile(self):
+    def setUp(self):
+        self.maxDiff = None
+
+    def test_ok_PM(self):
         m_tms_dir = "/opt/tile_matrix_set"
         m_env = {
             "ROK4_TMS_DIRECTORY": m_tms_dir
@@ -69,58 +72,57 @@ class TestBBoxToGetTile(TestCase):
         ]
         m_stdout = StringIO()
         m_tms_def = {
-           "tileMatrices" : [
-              {
-                 "id" : "14",
-                 "cellSize" : 9.55462853564703,
-                 "matrixHeight" : 16384,
-                 "pointOfOrigin" : [
-                    -20037508.3427892,
-                    20037508.3427892
-                 ],
-                 "tileHeight" : 256,
-                 "tileWidth" : 256,
-                 "scaleDenominator" : 34123.6733415965,
-                 "matrixWidth" : 16384
-              },
-              {
-                 "tileWidth" : 256,
-                 "scaleDenominator" : 17061.8366707983,
-                 "matrixWidth" : 32768,
-                 "cellSize" : 4.77731426782352,
-                 "matrixHeight" : 32768,
-                 "tileHeight" : 256,
-                 "pointOfOrigin" : [
-                    -20037508.3427892,
-                    20037508.3427892
-                 ],
-                 "id" : "15"
-              },
-              {
-                 "tileHeight" : 256,
-                 "pointOfOrigin" : [
-                    -20037508.3427892,
-                    20037508.3427892
-                 ],
-                 "matrixHeight" : 65536,
-                 "cellSize" : 2.38865713391176,
-                 "matrixWidth" : 65536,
-                 "scaleDenominator" : 8530.91833539914,
-                 "tileWidth" : 256,
-                 "id" : "16"
-              }
-           ],
-           "crs" : "EPSG:3857",
-           "orderedAxes" : [
-              "X",
-              "Y"
-           ],
-           "id" : "PM"
+            "tileMatrices" : [
+                {
+                    "id" : "14",
+                    "cellSize" : 9.55462853564703,
+                    "matrixHeight" : 16384,
+                    "pointOfOrigin" : [
+                        -20037508.3427892,
+                        20037508.3427892
+                    ],
+                    "tileHeight" : 256,
+                    "tileWidth" : 256,
+                    "scaleDenominator" : 34123.6733415965,
+                    "matrixWidth" : 16384
+                },
+                {
+                    "tileWidth" : 256,
+                    "scaleDenominator" : 17061.8366707983,
+                    "matrixWidth" : 32768,
+                    "cellSize" : 4.77731426782352,
+                    "matrixHeight" : 32768,
+                    "tileHeight" : 256,
+                    "pointOfOrigin" : [
+                        -20037508.3427892,
+                        20037508.3427892
+                    ],
+                    "id" : "15"
+                },
+                {
+                    "tileHeight" : 256,
+                    "pointOfOrigin" : [
+                        -20037508.3427892,
+                        20037508.3427892
+                    ],
+                    "matrixHeight" : 65536,
+                    "cellSize" : 2.38865713391176,
+                    "matrixWidth" : 65536,
+                    "scaleDenominator" : 8530.91833539914,
+                    "tileWidth" : 256,
+                    "id" : "16"
+                }
+            ],
+            "crs" : "EPSG:3857",
+            "orderedAxes" : [
+                "X",
+                "Y"
+            ],
+            "id" : "PM"
         }
 
 
         m_open = mock_open(read_data=json.dumps(m_tms_def))
-
         with patch("sys.argv", m_argv), patch("sys.stdout", m_stdout), \
                 patch("os.environ", m_env), patch("builtins.open", m_open), \
                 self.assertRaises(SystemExit) as cm:
@@ -129,7 +131,6 @@ class TestBBoxToGetTile(TestCase):
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         m_open.assert_called_once_with(f"{m_tms_dir}/PM.json", "r")
         stdout_content = m_stdout.getvalue()
-        match_list = []
         expected_match_list = [
             (17000, 15000),
             (17001, 15000),
@@ -140,22 +141,10 @@ class TestBBoxToGetTile(TestCase):
             (17000, 15002),
             (17001, 15002),
             (17002, 15002),
-            None
         ]
-        pattern = f"^TILEMATRIX={level_id}&TILECOL=([0-9]+)&TILEROW=([0-9]+)$"
-        for stdout_line in stdout_content.split("\n"):
-            line_match = re.match(pattern, stdout_line)
-            if line_match is not None:
-                match_list.append(line_match.group(1,2))
-            else:
-                match_list.append(None)
-        self.assertEqual(match_list, expected_match_list,
-            "unexpected console output")
-
-        match_list = re.finditer(
-            f"^TILEMATRIX={level_id}&TILECOL=([0-9]+)&TILEROW=([0-9]+)$",
-            stdout_content
-        )
-        self.assertRegex(stdout_content[0],
-            f"^TILEMATRIX={level_id}&TILECOL=[0-9]+&TILEROW=[0-9]+$")
+        expected_output = ""
+        for item in expected_match_list:
+            expected_output = (f"{expected_output}TILEMATRIX={level_id}"
+                + f"&TILECOL={item[0]}&TILEROW={item[1]}\n")
+        self.assertEqual(stdout_content, expected_output, "unexpected console output")
 
