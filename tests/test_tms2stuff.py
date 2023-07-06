@@ -57,11 +57,7 @@ class TestBBoxToGetTile(TestCase):
     def setUp(self):
         self.maxDiff = None
 
-    def test_ok_PM(self):
-        m_tms_dir = "/opt/tile_matrix_set"
-        m_env = {
-            "ROK4_TMS_DIRECTORY": m_tms_dir
-        }
+    def test_ok(self):
         level_id = "15"
         m_argv = [
             "rok4_tools/tms2stuff.py",
@@ -71,65 +67,35 @@ class TestBBoxToGetTile(TestCase):
             "--level", level_id,
         ]
         m_stdout = StringIO()
-        m_tms_def = {
-            "tileMatrices" : [
-                {
-                    "id" : "14",
-                    "cellSize" : 9.55462853564703,
-                    "matrixHeight" : 16384,
-                    "pointOfOrigin" : [
-                        -20037508.3427892,
-                        20037508.3427892
-                    ],
-                    "tileHeight" : 256,
-                    "tileWidth" : 256,
-                    "scaleDenominator" : 34123.6733415965,
-                    "matrixWidth" : 16384
-                },
-                {
-                    "tileWidth" : 256,
-                    "scaleDenominator" : 17061.8366707983,
-                    "matrixWidth" : 32768,
-                    "cellSize" : 4.77731426782352,
-                    "matrixHeight" : 32768,
-                    "tileHeight" : 256,
-                    "pointOfOrigin" : [
-                        -20037508.3427892,
-                        20037508.3427892
-                    ],
-                    "id" : "15"
-                },
-                {
-                    "tileHeight" : 256,
-                    "pointOfOrigin" : [
-                        -20037508.3427892,
-                        20037508.3427892
-                    ],
-                    "matrixHeight" : 65536,
-                    "cellSize" : 2.38865713391176,
-                    "matrixWidth" : 65536,
-                    "scaleDenominator" : 8530.91833539914,
-                    "tileWidth" : 256,
-                    "id" : "16"
-                }
-            ],
-            "crs" : "EPSG:3857",
-            "orderedAxes" : [
-                "X",
-                "Y"
-            ],
-            "id" : "PM"
-        }
+        m_bbox_to_tiles = Mock(
+            name="bbox_to_tiles",
+            return_value=(17000, 15000, 17002, 15002)
+        )
+        m_tm = Mock(
+            name="get_level",
+            return_value=type(
+                "", (object,), {"bbox_to_tiles": m_bbox_to_tiles}
+            )
+        )
+        m_tms = Mock(
+            name="TileMatrixSet",
+            return_value=type(
+                "", (object,), {"get_level": m_tm}
+            )
+        )
 
-
-        m_open = mock_open(read_data=json.dumps(m_tms_def))
         with patch("sys.argv", m_argv), patch("sys.stdout", m_stdout), \
-                patch("os.environ", m_env), patch("builtins.open", m_open), \
+                patch("rok4_tools.tms2stuff.TileMatrixSet.TileMatrixSet", m_tms), \
                 self.assertRaises(SystemExit) as cm:
             tms2stuff.main()
 
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        m_open.assert_called_once_with(f"{m_tms_dir}/PM.json", "r")
+        m_tms.assert_called_once_with(m_argv[1])
+        m_tm.assert_called_once_with(level_id)
+        m_bbox_to_tiles.assert_called_once_with(
+            (753363.55, 1688952.65, 757025.90, 1692621.45)
+        )
+
         stdout_content = m_stdout.getvalue()
         expected_match_list = [
             (17000, 15000),
