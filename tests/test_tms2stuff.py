@@ -77,6 +77,7 @@ class TestConversion(TestCase):
     def setUp(self):
         self.maxDiff = None
         self.tms_module = "rok4_tools.tms2stuff.TileMatrixSet"
+        self.storage_module = "rok4_tools.tms2stuff.Storage"
         self.m_tms_i = MagicMock(name="TileMatrixSet")
         self.m_tms_c = MagicMock(return_value=self.m_tms_i)
         self.m_tm = MagicMock(name="TileMatrix")
@@ -141,6 +142,140 @@ class TestConversion(TestCase):
         self.assertEqual(stdout_content, expected_output, 
             "unexpected console output")
 
+    def test_bbox_to_slab_indices_pm_ok(self):
+        """Test conversion from a BBOX to slab indices in the PM TMS.
+
+        Characteristics:
+            TMS: PM
+            Input: EPSG:3857 bounding box
+            Output: slab indices
+        """
+        level_id = "15"
+        m_bbox = (-19060337.37, 19644927.76, -19057891.39, 19647373.75)
+        m_bbox_to_tiles = MagicMock(
+            name="bbox_to_tiles",
+            return_value=(799, 319, 800, 321)
+        )
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        m_argv = [
+            "rok4_tools/tms2stuff.py",
+            "PM",
+            f"BBOX:{m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}",
+            "SLAB_INDICES",
+            "--level", level_id,
+            "--slabsize", "16x10",
+        ]
+
+        with patch("sys.argv", m_argv), \
+                patch("sys.stdout", self.m_stdout), \
+                patch("sys.stderr", self.m_stderr), \
+                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
+                self.assertRaises(SystemExit) as cm:
+            tms2stuff.main()
+
+        stdout_content = self.m_stdout.getvalue()
+        stderr_content = self.m_stderr.getvalue()
+        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
+        self.assertEqual(stderr_content, "",
+            msg=f"no error message should appear")
+        self.m_tms_c.assert_called_once_with(m_argv[1])
+        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        expected_output = ""
+        slabs_list = [
+            (49, 31),
+            (49, 32),
+            (50, 31),
+            (50, 32),
+        ]
+        for pair in slabs_list:
+            pair_string = f"{pair[0]},{pair[1]}"
+            expected_output = expected_output + pair_string + "\n"
+        self.assertEqual(stdout_content, expected_output, 
+            "unexpected console output")
+
+    def test_bbox_list_to_slab_indices_pm_ok(self):
+        """Test conversion from a list of BBOX to slab indices 
+            in the PM TMS.
+
+        Characteristics:
+            TMS: PM
+            Input: path to a existing file or object describing
+                a list of EPSG:3857 bounding boxes
+            Output: slab indices
+        """
+        level_id = "15"
+        list_path = "s3://temporary/bbox_list.txt"
+        bbox_list = [
+            (-19060337.37, 19646150.75, -19059114.38, 19647373.75),
+            (-19060337.37, 19644927.76, -19059114.38, 19646150.75),
+            (-19060337.37, 19643704.77, -19059114.38, 19644927.76),
+            (-19059114.38, 19643704.77, -19057891.38, 19647373.75),
+            (-19835714.58, 19736652.19, -19834491.59, 19737875.19),
+            (-19827153.64, 19731760.22, -19825930.64, 19732983.22),
+        ]
+        list_content = ""
+        for bbox in bbox_list:
+            bbox_string = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
+            list_content = list_content + bbox_string + "\n"
+        m_get_data = MagicMock(name="get_data_str", return_value=list_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        tiles_list = [
+            (799, 319, 800, 320),
+            (799, 320, 800, 321),
+            (799, 321, 800, 322),
+            (800, 319, 801, 322),
+            (165, 245, 166, 246),
+            (172, 249, 173, 250)
+        ]
+        m_bbox_to_tiles = MagicMock(name="bbox_to_tiles",
+            side_effect=tiles_list)
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        m_argv = [
+            "rok4_tools/tms2stuff.py",
+            "PM",
+            f"BBOXES_LIST:{list_path}",
+            "SLAB_INDICES",
+            "--level", level_id,
+            "--slabsize", "16x10",
+        ]
+
+        with patch("sys.argv", m_argv), \
+                patch("sys.stdout", self.m_stdout), \
+                patch("sys.stderr", self.m_stderr), \
+                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
+                self.assertRaises(SystemExit) as cm, \
+                patch(f"{self.storage_module}.exists", m_exists), \
+                patch(f"{self.storage_module}.get_data_str", m_get_data):
+            tms2stuff.main()
+
+        stdout_content = self.m_stdout.getvalue()
+        stderr_content = self.m_stderr.getvalue()
+        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
+        self.assertEqual(stderr_content, "",
+            msg=f"no error message should appear")
+        self.m_tms_c.assert_called_once_with(m_argv[1])
+        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        m_exists.assert_called_once_with(list_path)
+        m_get_data.assert_called_once_with(list_path)
+        self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_list,
+            msg="Wrong calls to TileMatrix.bbox_to_tiles(bbox)")
+        slabs_list = [
+            (10,24),
+            (10,25),
+            (49,31),
+            (49,32),
+            (50,31),
+            (50,32),
+        ]
+        expected_output = ""
+        for pair in slabs_list:
+            pair_string = f"{pair[0]},{pair[1]}"
+            expected_output = expected_output + pair_string + "\n"
+        self.assertEqual(stdout_content, expected_output, 
+            "unexpected console output")
+
+
+
     def test_tile_to_getmap_pm_ok(self):
         """Test tile indices to GetMap conversion in the PM TMS.
 
@@ -190,49 +325,6 @@ class TestConversion(TestCase):
             + f"&BBOX={m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}"
             + f"&CRS={m_projection}\n"
         )
-        self.assertEqual(stdout_content, expected_output, 
-            "unexpected console output")
-
-
-    def test_bbox_to_slab_indices_pm_ok(self):
-        """Test BBOX to GetTile conversion in the PM TMS.
-
-        Characteristics:
-            TMS: PM
-            Input: EPSG:3857 bounding box
-            Output: slab indices
-        """
-        level_id = "15"
-        m_bbox = (-19060337.37, 19644927.76, -19057891.39, 19647373.75)
-        m_bbox_to_tiles = MagicMock(
-            name="bbox_to_tiles",
-            return_value=(799, 319, 800, 321)
-        )
-        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
-        m_argv = [
-            "rok4_tools/tms2stuff.py",
-            "PM",
-            f"BBOX:{m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}",
-            "SLAB_INDICES",
-            "--level", level_id,
-            "--slabsize", "16x10",
-        ]
-
-        with patch("sys.argv", m_argv), \
-                patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr), \
-                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
-                self.assertRaises(SystemExit) as cm:
-            tms2stuff.main()
-
-        stdout_content = self.m_stdout.getvalue()
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        self.assertEqual(stderr_content, "",
-            msg=f"no error message should appear")
-        self.m_tms_c.assert_called_once_with(m_argv[1])
-        self.m_tms_i.get_level.assert_called_once_with(level_id)
-        expected_output = "49,31\n49,32\n50,31\n50,32\n"
         self.assertEqual(stdout_content, expected_output, 
             "unexpected console output")
 
