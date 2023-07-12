@@ -214,9 +214,11 @@ class TestConversion(TestCase):
             (-19827153.64, 19731760.22, -19825930.64, 19732983.22),
         ]
         list_content = ""
+        bbox_calls_list = []
         for bbox in bbox_list:
             bbox_string = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
             list_content = list_content + bbox_string + "\n"
+            bbox_calls_list.append(call(bbox))
         m_get_data = MagicMock(name="get_data_str", return_value=list_content)
         m_exists = MagicMock(name="exists", return_value=True)
         tiles_list = [
@@ -257,7 +259,7 @@ class TestConversion(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(level_id)
         m_exists.assert_called_once_with(list_path)
         m_get_data.assert_called_once_with(list_path)
-        self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_list,
+        self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_calls_list,
             msg="Wrong calls to TileMatrix.bbox_to_tiles(bbox)")
         slabs_list = [
             (10,24),
