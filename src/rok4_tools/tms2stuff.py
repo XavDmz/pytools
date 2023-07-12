@@ -5,30 +5,16 @@ import os
 from os import path
 import re
 import sys
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 from rok4 import TileMatrixSet
 from rok4 import Storage
 from rok4_tools import __version__
 
-def main():
-
-    parser = argparse.ArgumentParser(
-        allow_abbrev=False,
-        description="Coordinates conversion tool using Tile Matrix Sets (TMS)"
-    )
-    parser.add_argument("--version", action="version", version=__version__,
-        help="show the executable's version and exit")
-    parser.add_argument("tms_name", help="TMS name",)
-    parser.add_argument("input", help="input data to convert")
-    parser.add_argument("output", help="output format")
-    parser.add_argument("--level", help="TMS level, or TM id", dest="level")
-    parser.add_argument("--slabsize",
-        help="slab '<width>x<height>', expressed in number of tiles")
-    args = parser.parse_args()
+def main(args: Dict):
     slab_size = None
-    if args.slabsize:
-        slab_size_match = re.match("^([0-9]+)x([0-9]+)$", args.slabsize)
+    if "slabsize" in args and args["slabsize"]:
+        slab_size_match = re.match("^([0-9]+)x([0-9]+)$", args["slabsize"])
         if slab_size_match:
             slab_size = (
                 int(slab_size_match.group(1)),
@@ -36,16 +22,16 @@ def main():
             )
         else:
             error_message = (f"{sys.argv[0]}: error: argument --slabsize: "
-                + f"invalid value: '{args.slabsize}'\n"
+                + f"invalid value: {args['slabsize']}\n"
                 + "Value format must be '<int>x<int>' (Example: '16x12')")
             cli_syntax_error(error_message)
 
-    tms = TileMatrixSet.TileMatrixSet(args.tms_name)
-    input_parts = re.match("^([A-Z_]+)(?::(.*))?$", args.input).groups()
-    output_parts = re.match("^([A-Z_]+)(?::(.*))?$", args.output).groups()
+    tms = TileMatrixSet.TileMatrixSet(args["tms_name"])
+    input_parts = re.match("^([A-Z_]+)(?::(.*))?$", args["input"]).groups()
+    output_parts = re.match("^([A-Z_]+)(?::(.*))?$", args["output"]).groups()
     tm = None
-    if args.level:
-        tm = tms.get_level(args.level)
+    if "level" in args and args["level"]:
+        tm = tms.get_level(args["level"])
 
     if input_parts[0] == "BBOX":
         input_error_message = (
@@ -63,7 +49,7 @@ def main():
             for tile_row in range(row_min, row_max + 1, 1):
                 for tile_col in range(col_min, col_max + 1, 1):
                     print(
-                        f"TILEMATRIX={args.level}&TILECOL={tile_col}"
+                        f"TILEMATRIX={args['level']}&TILECOL={tile_col}"
                         + f"&TILEROW={tile_row}"
                     )
 
@@ -136,7 +122,7 @@ def main():
 
     sys.exit(0)
 
-def cli_syntax_error(message: str) -> SystemExit:
+def cli_syntax_error(message: str) -> None:
     print(message, file=sys.stderr)
     sys.exit(2)
 
@@ -152,20 +138,45 @@ def read_bbox(bbox_str: str,
 
     if bbox_match is None:
         cli_syntax_error(error_message)
-    bbox = (
-        float(bbox_match.group(1)),
-        float(bbox_match.group(2)),
-        float(bbox_match.group(3)),
-        float(bbox_match.group(4)),
-    )
-    return bbox
+    else:
+        bbox = (
+            float(bbox_match.group(1)),
+            float(bbox_match.group(2)),
+            float(bbox_match.group(3)),
+            float(bbox_match.group(4)),
+        )
+        return bbox
+    return
 
-def unknown_conversion(input_type: str, output_type: str) -> SystemExit:
+def unknown_conversion(input_type: str, output_type: str) -> None:
     print("No implemented conversion from",
         f"'{input_type}' to '{output_type}'.",
         sep=" ",
         file=sys.stderr)
     sys.exit(1)
 
+def parse_cli_args() -> Dict:
+    parser = argparse.ArgumentParser(
+        allow_abbrev=False,
+        description="Coordinates conversion tool using Tile Matrix Sets (TMS)"
+    )
+    parser.add_argument("--version", action="version", version=__version__,
+        help="show the executable's version and exit")
+    parser.add_argument("tms_name", help="TMS name",)
+    parser.add_argument("input", help="input data to convert")
+    parser.add_argument("output", help="output format")
+    parser.add_argument("--level", help="TMS level, or TM id", dest="level")
+    parser.add_argument("--slabsize",
+        help="slab '<width>x<height>', expressed in number of tiles")
+    args = parser.parse_args()
+    args_dict = {
+        "tms_name": args.tms_name,
+        "input": args.input,
+        "output": args.output,
+        "level": args.level,
+        "slabsize": args.slabsize,
+    }
+    return args_dict
+
 if __name__ == "__main__":
-    main()
+    main(parse_cli_args())

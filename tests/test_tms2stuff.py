@@ -15,14 +15,12 @@ from unittest.mock import call, MagicMock, Mock, mock_open, patch
 from rok4_tools import tms2stuff
 
 
-class TestGenericOptions(TestCase):
-    """Test generic CLI calls to the tool's executable."""
-    def setUp(self):
-        self.m_stdout = StringIO()
-        self.m_stderr = StringIO()
+class TestCLIPArsing(TestCase):
+    """Test parsing of CLI calls to the tool's executable."""
 
-
-    def test_help(self):
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_help(self, m_stdout, m_stderr):
         """Help / usage display options"""
         m_argv = [
             ["rok4_tools/tms2stuff.py", "-h"],
@@ -30,45 +28,138 @@ class TestGenericOptions(TestCase):
         ]
         i = 0
         for args in m_argv:
-            m_stdout = StringIO()
-            m_stderr = StringIO()
             with patch("sys.argv", args), \
-                    self.assertRaises(SystemExit) as cm, \
-                    patch("sys.stdout", self.m_stdout), \
-                    patch("sys.stderr", self.m_stderr):
-                tms2stuff.main()
+                    self.assertRaises(SystemExit) as cm:
+                tms2stuff.parse_cli_args()
 
             self.assertEqual(cm.exception.code, 0,
                 msg=f"exit code should be 0 (option '{args[1]}')")
-            stdout_content = self.m_stdout.getvalue()
-            self.assertRegex(stdout_content, "\n *optional arguments:",
+            self.assertRegex(m_stdout.getvalue(), "\n *optional arguments:",
                 msg=f"help message should appear (option '{args[1]}')")
-            stderr_content = self.m_stderr.getvalue()
             self.assertEqual(
-                stderr_content, "",
+                m_stderr.getvalue(), "",
                 msg=("no error message should appear "
                     + f"(option '{args[1]}')")
             )
             i = i + 1
 
-    def test_version(self):
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_version(self, m_stdout, m_stderr):
         """Version display option"""
         m_argv = ["rok4_tools/tms2stuff.py", "--version"]
-        m_stdout = StringIO()
-        m_stderr = StringIO()
 
         with patch("sys.argv", m_argv), \
-                self.assertRaises(SystemExit) as cm, \
-                patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr):
-            tms2stuff.main()
+                self.assertRaises(SystemExit) as cm:
+            tms2stuff.parse_cli_args()
 
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        stdout_content = self.m_stdout.getvalue()
-        self.assertRegex(stdout_content, "^[0-9]+[.][0-9]+[.][0-9]+")
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(stderr_content, "",
+        self.assertRegex(m_stdout.getvalue(), "^[0-9]+[.][0-9]+[.][0-9]+")
+        self.assertEqual(m_stderr.getvalue(), "",
             msg=f"no error message should appear")
+
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_nominal_conversion(self, m_stdout, m_stderr):
+        """Nominal call to request a conversion"""
+        arg_dict = {
+            "tms_name": "WGS84G",
+            "level": "11",
+            "input": "BBOX:2.798552,48.974623,2.860435,50.745681",
+            "output": "SLAB_INDICES",
+            "slabsize": "16x16",
+        }
+        m_argv = [
+            "rok4_tools/tms2stuff.py",
+            arg_dict["tms_name"],
+            arg_dict["input"],
+            arg_dict["output"],
+            "--level", arg_dict["level"],
+            "--slabsize", arg_dict["slabsize"],
+        ]
+
+        with patch("sys.argv", m_argv):
+            result = tms2stuff.parse_cli_args()
+
+        self.assertEqual(result, arg_dict)
+        self.assertEqual(m_stdout.getvalue(), "")
+        self.assertEqual(m_stderr.getvalue(), "")
+
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_invalid_conversion(self, m_stdout, m_stderr):
+        """Invalid call to request a conversion"""
+        m_argv = [
+            "rok4_tools/tms2stuff.py",
+            "WGS84G",
+            "BBOX:2.798552,48.974623,2.860435,50.745681",
+            "--level", "11",
+            "--unknown", "16x16",
+        ]
+
+        with patch("sys.argv", m_argv), \
+                self.assertRaises(SystemExit) as cm:
+            tms2stuff.parse_cli_args()
+
+        self.assertEqual(cm.exception.code, 2, msg="exit code should be 2")
+        self.assertEqual(m_stdout.getvalue(), "")
+        self.assertRegex(m_stderr.getvalue(), "usage: (.+\n)+.+py: error:.*")
+
+
+class TestGeneralProcessing(TestCase):
+    """Test general processing functions (not conversion themselves)"""
+
+    @patch("sys.exit")
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_unknown_conversion(self, m_stdout, m_stderr, m_exit):
+        """Test simple call to tms2stuff.unknown_conversion()"""
+        tms2stuff.unknown_conversion("GEOJSON", "GML")
+        self.assertEqual(m_stdout.getvalue(), "")
+        self.assertRegex(m_stderr.getvalue(),
+            ".*No implemented conversion from.+GEOJSON.+to.+GML.*")
+        m_exit.assert_called_once_with(1)
+
+    @patch("sys.exit")
+    @patch("sys.stderr", new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_cli_syntax_error(self, m_stdout, m_stderr, m_exit):
+        """Test simple call to tms2stuff.cli_syntax_error()"""
+        tms2stuff.cli_syntax_error("Appropriate message.")
+        self.assertEqual(m_stdout.getvalue(), "")
+        self.assertEqual(m_stderr.getvalue(), "Appropriate message.\n")
+        m_exit.assert_called_once_with(2)
+
+    @patch("rok4_tools.tms2stuff.cli_syntax_error")
+    def test_read_bbox_ok(self, m_error):
+        """Test valid call to tms2stuff.read_bbox()"""
+        bbox = (-12.5, 0, 23, 65.781)
+        result = tms2stuff.read_bbox(
+            f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}")
+        m_error.assert_not_called()
+        self.assertEqual(result, bbox)
+
+    @patch("rok4_tools.tms2stuff.cli_syntax_error")
+    def test_read_bbox_nok_with_message(self, m_error):
+        """Test invalid call to tms2stuff.read_bbox()
+        Optional error message included
+        """
+        message = "This is the expected error message."
+        result = tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')",
+            message)
+        m_error.assert_called_once_with(message)
+        self.assertIsNone(result)
+
+    @patch("rok4_tools.tms2stuff.cli_syntax_error")
+    def test_read_bbox_nok_default(self, m_error):
+        """Test invalid call to tms2stuff.read_bbox()
+        Default error message.
+        """
+        result = tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')")
+        m_error.assert_called_once()
+        self.assertRegex(m_error.call_args.args[0],
+            "Invalid BBOX: .*\nExpected BBOX format is .*")
+        self.assertIsNone(result)
 
 
 class TestConversion(TestCase):
@@ -93,34 +184,31 @@ class TestConversion(TestCase):
             Input: EPSG:3857 bounding box
             Output: WMTS GetTile parameters
         """
-        level_id = "15"
-        m_argv = [
-            "rok4_tools/tms2stuff.py",
-            "PM",
-            "BBOX:753363.55,1688952.65,757025.90,1692621.45",
-            "GETTILE_PARAMS",
-            "--level", level_id,
-        ]
+        args = {
+            "tms_name": "PM",
+            "input": "BBOX:753363.55,1688952.65,757025.90,1692621.45",
+            "output": "GETTILE_PARAMS",
+            "level": "15",
+        }
         m_bbox_to_tiles = MagicMock(
             name="bbox_to_tiles",
             return_value=(17000, 15000, 17002, 15002)
         )
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
 
-        with patch("sys.argv", m_argv), \
-                patch("sys.stdout", self.m_stdout), \
+        with patch("sys.stdout", self.m_stdout), \
                 patch("sys.stderr", self.m_stderr), \
                 patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
                 self.assertRaises(SystemExit) as cm:
-            tms2stuff.main()
+            tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
         stderr_content = self.m_stderr.getvalue()
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         self.assertEqual(stderr_content, "",
             msg=f"no error message should appear")
-        self.m_tms_c.assert_called_once_with(m_argv[1])
-        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_bbox_to_tiles.assert_called_once_with(
             (753363.55, 1688952.65, 757025.90, 1692621.45)
         )
@@ -137,7 +225,7 @@ class TestConversion(TestCase):
         ]
         expected_output = ""
         for item in expected_match_list:
-            expected_output = (f"{expected_output}TILEMATRIX={level_id}"
+            expected_output = (f"{expected_output}TILEMATRIX={args['level']}"
                 + f"&TILECOL={item[0]}&TILEROW={item[1]}\n")
         self.assertEqual(stdout_content, expected_output, 
             "unexpected console output")
@@ -157,29 +245,27 @@ class TestConversion(TestCase):
             return_value=(799, 319, 800, 321)
         )
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
-        m_argv = [
-            "rok4_tools/tms2stuff.py",
-            "PM",
-            f"BBOX:{m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}",
-            "SLAB_INDICES",
-            "--level", level_id,
-            "--slabsize", "16x10",
-        ]
+        args = {
+            "tms_name": "PM",
+            "input": f"BBOX:{m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}",
+            "output": "SLAB_INDICES",
+            "level": "15",
+            "slabsize": "16x10",
+        }
 
-        with patch("sys.argv", m_argv), \
-                patch("sys.stdout", self.m_stdout), \
+        with patch("sys.stdout", self.m_stdout), \
                 patch("sys.stderr", self.m_stderr), \
                 patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
                 self.assertRaises(SystemExit) as cm:
-            tms2stuff.main()
+            tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
         stderr_content = self.m_stderr.getvalue()
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         self.assertEqual(stderr_content, "",
             msg=f"no error message should appear")
-        self.m_tms_c.assert_called_once_with(m_argv[1])
-        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
         expected_output = ""
         slabs_list = [
             (49, 31),
@@ -203,7 +289,6 @@ class TestConversion(TestCase):
                 a list of EPSG:3857 bounding boxes
             Output: slab indices
         """
-        level_id = "15"
         list_path = "s3://temporary/bbox_list.txt"
         bbox_list = [
             (-19060337.37, 19646150.75, -19059114.38, 19647373.75),
@@ -232,31 +317,29 @@ class TestConversion(TestCase):
         m_bbox_to_tiles = MagicMock(name="bbox_to_tiles",
             side_effect=tiles_list)
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
-        m_argv = [
-            "rok4_tools/tms2stuff.py",
-            "PM",
-            f"BBOXES_LIST:{list_path}",
-            "SLAB_INDICES",
-            "--level", level_id,
-            "--slabsize", "16x10",
-        ]
+        args = {
+            "tms_name": "PM",
+            "input": f"BBOXES_LIST:{list_path}",
+            "output": "SLAB_INDICES",
+            "level": "15",
+            "slabsize": "16x10",
+        }
 
-        with patch("sys.argv", m_argv), \
-                patch("sys.stdout", self.m_stdout), \
+        with patch("sys.stdout", self.m_stdout), \
                 patch("sys.stderr", self.m_stderr), \
                 patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
                 self.assertRaises(SystemExit) as cm, \
                 patch(f"{self.storage_module}.exists", m_exists), \
                 patch(f"{self.storage_module}.get_data_str", m_get_data):
-            tms2stuff.main()
+            tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
         stderr_content = self.m_stderr.getvalue()
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         self.assertEqual(stderr_content, "",
             msg=f"no error message should appear")
-        self.m_tms_c.assert_called_once_with(m_argv[1])
-        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(list_path)
         m_get_data.assert_called_once_with(list_path)
         self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_calls_list,
@@ -286,14 +369,12 @@ class TestConversion(TestCase):
             Input: tile indices
             Output: WMS GetMap parameters
         """
-        level_id = "15"
-        m_argv = [
-            "rok4_tools/tms2stuff.py",
-            "PM",
-            "TILE_INDICE:17000,15000",
-            "GETMAP_PARAMS",
-            "--level", level_id,
-        ]
+        args = {
+            "tms_name": "PM",
+            "input": "TILE_INDICE:17000,15000",
+            "output": "GETMAP_PARAMS",
+            "level": "15",
+        }
         m_bbox = (753363.3507787623, 10936117.94367338,
                 754586.3432313241, 10936724.662585393)
         m_projection = "EPSG:3857"
@@ -306,20 +387,19 @@ class TestConversion(TestCase):
         self.m_tms_i.srs = m_projection
         self.m_tm.tile_size = m_tile_size
 
-        with patch("sys.argv", m_argv), \
-                patch("sys.stdout", self.m_stdout), \
+        with patch("sys.stdout", self.m_stdout), \
                 patch("sys.stderr", self.m_stderr), \
                 patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
                 self.assertRaises(SystemExit) as cm:
-            tms2stuff.main()
+            tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
         stderr_content = self.m_stderr.getvalue()
         self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
         self.assertEqual(stderr_content, "",
             msg=f"no error message should appear")
-        self.m_tms_c.assert_called_once_with(m_argv[1])
-        self.m_tms_i.get_level.assert_called_once_with(level_id)
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_tile_to_bbox.assert_called_once_with(tile_col=17000, tile_row=15000)
         expected_output = (
             f"WIDTH={m_tile_size[0]}"
