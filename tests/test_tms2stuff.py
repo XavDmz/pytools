@@ -15,7 +15,7 @@ from unittest.mock import call, MagicMock, Mock, mock_open, patch
 from rok4_tools import tms2stuff
 
 
-class TestCLIPArsing(TestCase):
+class TestArgumentsParsing(TestCase):
     """Test parsing of CLI calls to the tool's executable."""
 
     @patch("sys.stderr", new_callable=StringIO)
@@ -106,75 +106,81 @@ class TestCLIPArsing(TestCase):
         self.assertRegex(m_stderr.getvalue(), "usage: (.+\n)+.+py: error:.*")
 
 
-class TestGeneralProcessing(TestCase):
-    """Test general processing functions (not conversion themselves)"""
+class TestArgumentsTransformation(TestCase):
+    """Test post-parsing arguments transformation functions"""
 
-    @patch("sys.exit")
-    @patch("sys.stderr", new_callable=StringIO)
-    @patch("sys.stdout", new_callable=StringIO)
-    def test_unknown_conversion(self, m_stdout, m_stderr, m_exit):
-        """Test simple call to tms2stuff.unknown_conversion()"""
-        tms2stuff.unknown_conversion("GEOJSON", "GML")
-        self.assertEqual(m_stdout.getvalue(), "")
-        self.assertRegex(m_stderr.getvalue(),
-            ".*No implemented conversion from.+GEOJSON.+to.+GML.*")
-        m_exit.assert_called_once_with(1)
-
-    @patch("sys.exit")
-    @patch("sys.stderr", new_callable=StringIO)
-    @patch("sys.stdout", new_callable=StringIO)
-    def test_cli_syntax_error(self, m_stdout, m_stderr, m_exit):
-        """Test simple call to tms2stuff.cli_syntax_error()"""
-        tms2stuff.cli_syntax_error("Appropriate message.")
-        self.assertEqual(m_stdout.getvalue(), "")
-        self.assertEqual(m_stderr.getvalue(), "Appropriate message.\n")
-        m_exit.assert_called_once_with(2)
-
-    @patch("rok4_tools.tms2stuff.cli_syntax_error")
-    def test_read_bbox_ok(self, m_error):
+    def test_read_bbox_ok(self):
         """Test valid call to tms2stuff.read_bbox()"""
         bbox = (-12.5, 0, 23, 65.781)
         result = tms2stuff.read_bbox(
             f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}")
-        m_error.assert_not_called()
         self.assertEqual(result, bbox)
 
-    @patch("rok4_tools.tms2stuff.cli_syntax_error")
-    def test_read_bbox_nok_with_message(self, m_error):
+    def test_read_bbox_nok_with_message(self):
         """Test invalid call to tms2stuff.read_bbox()
         Optional error message included
         """
         message = "This is the expected error message."
-        result = tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')",
+        with self.assertRaises(ValueError) as cm:
+            tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')",
             message)
-        m_error.assert_called_once_with(message)
-        self.assertIsNone(result)
+        self.assertEqual(str(cm.exception), message)
 
-    @patch("rok4_tools.tms2stuff.cli_syntax_error")
-    def test_read_bbox_nok_default(self, m_error):
+    def test_read_bbox_nok_default(self):
         """Test invalid call to tms2stuff.read_bbox()
         Default error message.
         """
-        result = tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')")
-        m_error.assert_called_once()
-        self.assertRegex(m_error.call_args.args[0],
+        with self.assertRaises(ValueError) as cm:
+            tms2stuff.read_bbox("('-12.5', '0', '23', '65.781')")
+        self.assertRegex(str(cm.exception),
             "Invalid BBOX: .*\nExpected BBOX format is .*")
-        self.assertIsNone(result)
 
-
-class TestConversion(TestCase):
-    """Test conversions"""
+class TestProcessingFunctions(TestCase):
+    """Test data processing functions"""
 
     def setUp(self):
+        self.mod = "rok4_tools.tms2stuff"
         self.maxDiff = None
-        self.tms_module = "rok4_tools.tms2stuff.TileMatrixSet"
-        self.storage_module = "rok4_tools.tms2stuff.Storage"
         self.m_tms_i = MagicMock(name="TileMatrixSet")
-        self.m_tms_c = MagicMock(return_value=self.m_tms_i)
+        self.m_tms_c = MagicMock(name="TileMatrixSet()",
+            return_value=self.m_tms_i)
+        self.m_tm = MagicMock(name="TileMatrix")
+        self.m_tms_i.get_level = MagicMock(return_value=self.m_tm)
+
+    def test_bbox_to_gettile_ok(self):
+        """Nominal bbox_to_gettile() call"""
+        bbox = (753363.55, 1688952.65, 757025.90, 1692621.45)
+        tile_box = (17000, 15000, 17002, 15002)
+        m_bbox_to_tiles = MagicMock(
+            name="bbox_to_tiles",
+            return_value=tile_box
+        )
+        self.m_tm.id = "13"
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        expected = []
+        for column in range(tile_box[0], tile_box[2] +1 , 1):
+            for row in range(tile_box[1], tile_box[3] +1 , 1):
+                expected.append(f"TILEMATRIX={self.m_tm.id}"
+                    + f"&TILECOL={column}&TILEROW={row}")
+
+        with patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
+            result = tms2stuff.bbox_to_gettile(self.m_tm, bbox)
+
+        m_bbox_to_tiles.assert_called_once_with(bbox)
+        self.assertEqual(result, expected)
+
+class TestMain(TestCase):
+    """Test main() function"""
+
+    def setUp(self):
+        self.mod = "rok4_tools.tms2stuff"
+        self.maxDiff = None
+        self.m_tms_i = MagicMock(name="TileMatrixSet")
+        self.m_tms_c = MagicMock(name="TileMatrixSet()",
+            return_value=self.m_tms_i)
         self.m_tm = MagicMock(name="TileMatrix")
         self.m_tms_i.get_level = MagicMock(return_value=self.m_tm)
         self.m_stdout = StringIO()
-        self.m_stderr = StringIO()
 
     def test_bbox_to_tiles_pm_ok(self):
         """Test BBOX to GetTile conversion in the PM TMS.
@@ -195,18 +201,13 @@ class TestConversion(TestCase):
             return_value=(17000, 15000, 17002, 15002)
         )
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        self.m_tm.id = args["level"]
 
         with patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr), \
-                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
-                self.assertRaises(SystemExit) as cm:
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
             tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        self.assertEqual(stderr_content, "",
-            msg=f"no error message should appear")
         self.m_tms_c.assert_called_once_with(args["tms_name"])
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_bbox_to_tiles.assert_called_once_with(
@@ -214,20 +215,20 @@ class TestConversion(TestCase):
         )
         expected_match_list = [
             (17000, 15000),
-            (17001, 15000),
-            (17002, 15000),
             (17000, 15001),
-            (17001, 15001),
-            (17002, 15001),
             (17000, 15002),
+            (17001, 15000),
+            (17001, 15001),
             (17001, 15002),
+            (17002, 15000),
+            (17002, 15001),
             (17002, 15002),
         ]
         expected_output = ""
         for item in expected_match_list:
             expected_output = (f"{expected_output}TILEMATRIX={args['level']}"
                 + f"&TILECOL={item[0]}&TILEROW={item[1]}\n")
-        self.assertEqual(stdout_content, expected_output, 
+        self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
     def test_bbox_to_slab_indices_pm_ok(self):
@@ -254,16 +255,10 @@ class TestConversion(TestCase):
         }
 
         with patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr), \
-                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
-                self.assertRaises(SystemExit) as cm:
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
             tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        self.assertEqual(stderr_content, "",
-            msg=f"no error message should appear")
         self.m_tms_c.assert_called_once_with(args["tms_name"])
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         expected_output = ""
@@ -276,11 +271,11 @@ class TestConversion(TestCase):
         for pair in slabs_list:
             pair_string = f"{pair[0]},{pair[1]}"
             expected_output = expected_output + pair_string + "\n"
-        self.assertEqual(stdout_content, expected_output, 
+        self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
     def test_bbox_list_to_slab_indices_pm_ok(self):
-        """Test conversion from a list of BBOX to slab indices 
+        """Test conversion from a list of BBOX to slab indices
             in the PM TMS.
 
         Characteristics:
@@ -289,7 +284,7 @@ class TestConversion(TestCase):
                 a list of EPSG:3857 bounding boxes
             Output: slab indices
         """
-        list_path = "s3://temporary/bbox_list.txt"
+        file_path = "s3://temporary/bbox_list.txt"
         bbox_list = [
             (-19060337.37, 19646150.75, -19059114.38, 19647373.75),
             (-19060337.37, 19644927.76, -19059114.38, 19646150.75),
@@ -319,29 +314,23 @@ class TestConversion(TestCase):
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
         args = {
             "tms_name": "PM",
-            "input": f"BBOXES_LIST:{list_path}",
+            "input": f"BBOXES_LIST:{file_path}",
             "output": "SLAB_INDICES",
             "level": "15",
             "slabsize": "16x10",
         }
 
         with patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr), \
-                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
-                self.assertRaises(SystemExit) as cm, \
-                patch(f"{self.storage_module}.exists", m_exists), \
-                patch(f"{self.storage_module}.get_data_str", m_get_data):
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data):
             tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        self.assertEqual(stderr_content, "",
-            msg=f"no error message should appear")
         self.m_tms_c.assert_called_once_with(args["tms_name"])
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
-        m_exists.assert_called_once_with(list_path)
-        m_get_data.assert_called_once_with(list_path)
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
         self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_calls_list,
             msg="Wrong calls to TileMatrix.bbox_to_tiles(bbox)")
         slabs_list = [
@@ -356,9 +345,69 @@ class TestConversion(TestCase):
         for pair in slabs_list:
             pair_string = f"{pair[0]},{pair[1]}"
             expected_output = expected_output + pair_string + "\n"
-        self.assertEqual(stdout_content, expected_output, 
+        self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
+    def test_wkt_file_to_gettile_l93_ok(self):
+        """Test conversion from a WKT geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a WKT geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.wkt"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = ("POLYGON(("
+            + f"{bbox[0]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[1]}"
+            + "))")
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        query_list = [
+            "TILEMATRIX=13&TILECOL=95&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=834",
+        ]
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile",
+            return_value=query_list)
+        expected_output = "\n".join(query_list) + "\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
 
 
     def test_tile_to_getmap_pm_ok(self):
@@ -388,16 +437,10 @@ class TestConversion(TestCase):
         self.m_tm.tile_size = m_tile_size
 
         with patch("sys.stdout", self.m_stdout), \
-                patch("sys.stderr", self.m_stderr), \
-                patch(f"{self.tms_module}.TileMatrixSet", self.m_tms_c), \
-                self.assertRaises(SystemExit) as cm:
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
             tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
-        stderr_content = self.m_stderr.getvalue()
-        self.assertEqual(cm.exception.code, 0, msg="exit code should be 0")
-        self.assertEqual(stderr_content, "",
-            msg=f"no error message should appear")
         self.m_tms_c.assert_called_once_with(args["tms_name"])
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_tile_to_bbox.assert_called_once_with(tile_col=17000, tile_row=15000)
@@ -407,6 +450,6 @@ class TestConversion(TestCase):
             + f"&BBOX={m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}"
             + f"&CRS={m_projection}\n"
         )
-        self.assertEqual(stdout_content, expected_output, 
+        self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
