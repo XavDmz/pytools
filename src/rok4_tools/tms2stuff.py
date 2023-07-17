@@ -1,3 +1,14 @@
+"""Convert data to another format using a tile matrix set.
+
+Exit codes:
+    0 - regular exit
+    1 - regular error code, details logged in stderr
+    2 - argument syntax or data value error, details logged in stderr
+
+Print up to date usage message with the following command:
+    tms2stuff.py --help
+See the project's README and github documentation for more information.
+"""
 import argparse
 import json
 import math
@@ -13,10 +24,13 @@ from rok4.TileMatrixSet import TileMatrixSet, TileMatrix
 from rok4.Storage import exists, get_data_str
 from rok4_tools import __version__
 
+# Enable GDAL/OGR exceptions
+ogr.UseExceptions()
+
 # CLI arguments parsing
 
 def parse_cli_args() -> Dict:
-    """Parse raw arguments from CLI call
+    """Parse raw arguments from CLI call.
 
     Raises:
         SystemExit: two possible cases with different error codes:
@@ -52,7 +66,7 @@ def parse_cli_args() -> Dict:
 
 def read_bbox(bbox_str: str, error_message: str = None
         ) -> Tuple[float, float, float, float]:
-    """Converts a bounding box (BBOX) string to a tuple
+    """Convert a bounding box (BBOX) string to a tuple.
 
     Args:
         bbox_str (str): BBOX as a string "min_x,min_y,max_x,max_y"
@@ -74,7 +88,7 @@ def read_bbox(bbox_str: str, error_message: str = None
     coord_pattern = "-?[0-9]+(?:[.][0-9]+)?"
     bbox_pattern = (f"^({coord_pattern}),({coord_pattern}),"
                 + f"({coord_pattern}),({coord_pattern})$")
-    bbox_match = re.match(bbox_pattern, bbox_str)
+    bbox_match = re.search(bbox_pattern, bbox_str)
 
     if bbox_match is None:
         raise ValueError(error_message)
@@ -91,7 +105,7 @@ def read_bbox(bbox_str: str, error_message: str = None
 
 def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float]
         ) -> List[str]:
-    """Converts a bounding box (BBOX) to excerpts of GetTile queries
+    """Convert a bounding box (BBOX) to excerpts of GetTile queries.
 
     Args:
         tm (TileMatrix): target GetTile
@@ -110,18 +124,34 @@ def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float]
                 + f"&TILEROW={row}")
     return query_list
 
+# Custom exceptions
+
+class Error(Exception):
+    """Base class for exceptions in this module."""
+    pass
+
+class GeometryError(Error):
+    """Raised when a geometry could not be processed.
+
+    Such a case may happen for example when a '.wkt' file contains
+    something else than a WKT geometry string,
+    or when a geometry is invalid.
+    """
+    pass
+
 # Main function
 
 def main(args: Dict) -> None:
-    """Main processing function
+    """Execute the conversion matching the specified input and output.
 
     Args:
         args (Dict): arguments dictionary returned by parse_cli_args()
 
     Raises:
-        ValueError: incorrect syntax for an argument value
-        RuntimeError: no conversion matching requested input and output
         FileNotFoundError: a specified file was not found
+        GeometryError: geometry couldn't be processed
+        RuntimeError: no conversion matching requested input and output
+        ValueError: incorrect syntax for an argument value
     """
     implemented = {
         "BBOX": [
@@ -141,7 +171,7 @@ def main(args: Dict) -> None:
 
     slab_size = None
     if "slabsize" in args and args["slabsize"]:
-        slab_size_match = re.match("^([0-9]+)x([0-9]+)$", args["slabsize"])
+        slab_size_match = re.search("^([0-9]+)x([0-9]+)$", args["slabsize"])
         if slab_size_match:
             slab_size = (
                 int(slab_size_match.group(1)),
@@ -153,9 +183,18 @@ def main(args: Dict) -> None:
                 + "Value format must be '<int>x<int>' (Example: '16x12')")
             raise ValueError(error_message)
 
-    tms = TileMatrixSet(args["tms_name"])
-    input_parts = re.match("^([A-Z_]+)(?::(.*))?$", args["input"]).groups()
-    output_parts = re.match("^([A-Z_]+)(?::(.*))?$", args["output"]).groups()
+    try:
+        tms = TileMatrixSet(args["tms_name"])
+        format_pattern = "^([A-Z_]+)(?::(.*))?$"
+        input_parts = re.search(format_pattern, args["input"]).groups()
+        output_parts = re.search(format_pattern, args["output"]).groups()
+    except:
+        positional = " ".join([
+            args["tms_name"],
+            args["input"],
+            args["output"]
+        ])
+        raise ValueError("Unrecognised positional arguments : " + positional)
     tm = None
     if "level" in args and args["level"]:
         tm = tms.get_level(args["level"])
@@ -227,21 +266,30 @@ def main(args: Dict) -> None:
     elif input_parts[0] == "GEOM_FILE":
         if input_parts[1] is None:
             raise ValueError("Syntax for geometry file input is: "
-                + "'GEOM_FILE:<path_to_list>'")
+                + "'GEOM_FILE:<path_to_file>'")
         if not exists(input_parts[1]):
             raise FileNotFoundError(
                 f"File or object not found: {input_parts[1]}")
         geometry_str = get_data_str(input_parts[1])
-        supported_formats = {
-            "WKT": ("^(SRID:[0-9]+;)?(MULTI)?"
-                + "(POINT|POLYGON|LINESTRING|GEOMETRYCOLLECTION)"),
-        }
-
-        if re.match(supported_formats["WKT"], geometry_str):
-            geometry = ogr.CreateGeometryFromWkt(geometry_str)
-        else:
-            raise RuntimeError("Unsupported geometry format. Supported formats : "
-                + f"{list(supported_formats)}")
+        try:
+            geometry = ogr.CreateGeometryFromGML(geometry_str)
+        except (RuntimeError, TypeError):
+            try:
+                geometry = ogr.CreateGeometryFromJson(geometry_str)
+            except (RuntimeError, TypeError):
+                try:
+                    geometry = ogr.CreateGeometryFromWkb(geometry_str)
+                except (RuntimeError, TypeError):
+                    try:
+                        geometry = ogr.CreateGeometryFromWkt(geometry_str)
+                    except (RuntimeError, TypeError):
+                        raise GeometryError(
+                            "Input geometry error in file '"
+                            + input_parts[1]
+                            + "': unhandled format or invalid data. "
+                            + "Handled formats are: "
+                            + "GML, GeoJSON, WKB, WKT."
+                        )
 
         (min_x, max_x, min_y, max_y) = geometry.GetEnvelope()
         bbox = (min_x, min_y, max_x, max_y)
@@ -256,7 +304,7 @@ def main(args: Dict) -> None:
         if input_parts[1] is None:
             raise ValueError(input_error_message)
         indices_pattern = "^([0-9]+),([0-9]+)$"
-        indices_match = re.match(indices_pattern, input_parts[1])
+        indices_match = re.search(indices_pattern, input_parts[1])
         if indices_match is None:
             raise ValueError(input_error_message)
         tile_col = int(indices_match.group(1))
@@ -274,11 +322,15 @@ def main(args: Dict) -> None:
 # If called as a script (nominal use case)
 
 if __name__ == "__main__":
+    exit_code = 0
     try:
         main(parse_cli_args())
+    except SystemExit as sys_exit:
+        exit_code = sys_exit.code
     except ValueError as err:
         print(f"ValueError: {str(err)}", file=sys.stderr)
-        sys.exit(2)
-    except (RuntimeError, FileNotFoundError) as err:
-        print(f"RuntimeError: {str(err)}", file=sys.stderr)
-        sys.exit(1)
+        exit_code = 2
+    except (Exception) as err:
+        print(f"Error: {str(err)}", file=sys.stderr)
+        exit_code = 1
+    sys.exit(exit_code)

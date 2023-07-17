@@ -409,6 +409,277 @@ class TestMain(TestCase):
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
+    def test_gml_file_to_gettile_l93_ok(self):
+        """Test conversion from a GML geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a GML geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.gml"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = (
+            "<gml:Polygon><gml:outerBoundaryIs>"
+            + "<gml:LinearRing><gml:coordinates>"
+            + f"{bbox[0]},{bbox[1]} "
+            + f"{bbox[2]},{bbox[1]} "
+            + f"{bbox[2]},{bbox[3]} "
+            + f"{bbox[0]},{bbox[3]} "
+            + f"{bbox[0]},{bbox[1]}"
+            + "</gml:coordinates></gml:LinearRing>"
+            + "</gml:outerBoundaryIs></gml:Polygon>"
+        )
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        query_list = [
+            "TILEMATRIX=13&TILECOL=95&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=834",
+        ]
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile",
+            return_value=query_list)
+        expected_output = "\n".join(query_list) + "\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
+
+    def test_geojson_file_to_gettile_l93_ok(self):
+        """Test conversion from a GeoJSON geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a GeoJSON geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.geojson"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = json.dumps({
+            "type": "Polygon",
+            "coordinates": [[
+                [bbox[0], bbox[1]],
+                [bbox[2], bbox[1]],
+                [bbox[2], bbox[3]],
+                [bbox[0], bbox[3]],
+                [bbox[0], bbox[1]],
+            ]]
+        })
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        query_list = [
+            "TILEMATRIX=13&TILECOL=95&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=834",
+        ]
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile",
+            return_value=query_list)
+        expected_output = "\n".join(query_list) + "\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
+
+    def test_wkb_file_to_gettile_l93_ok(self):
+        """Test conversion from a WKB geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a WKB geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.wkb"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = b"\x00\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x05A#\x12\xd0\x00\x00\x00\x00AX\xea\xe8\x00\x00\x00\x00A#\xaf\x10\x00\x00\x00\x00AX\xea\xe8\x00\x00\x00\x00A#\xaf\x10\x00\x00\x00\x00AX\xf7\x9a\x00\x00\x00\x00A#\x12\xd0\x00\x00\x00\x00AX\xf7\x9a\x00\x00\x00\x00A#\x12\xd0\x00\x00\x00\x00AX\xea\xe8\x00\x00\x00\x00"
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        query_list = [
+            "TILEMATRIX=13&TILECOL=95&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=95&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=96&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=97&TILEROW=834",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=832",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=833",
+            "TILEMATRIX=13&TILECOL=98&TILEROW=834",
+        ]
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile",
+            return_value=query_list)
+        expected_output = "\n".join(query_list) + "\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
+
+    def test_wkt_file_to_gettile_l93_nok(self):
+        """Test conversion from an invalid WKT geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a WKT geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.wkt"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = ("POLYGON("
+            + f"{bbox[0]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[1]}"
+            + ")")
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile")
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile), \
+                self.assertRaises(tms2stuff.GeometryError) as cm:
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_not_called()
+        self.assertEqual(stdout_content, "", "unexpected console output")
+        self.assertRegex(str(cm.exception), "^Input geometry error in file.*",
+            "unexpected error message")
+
+    def test_geom_file_to_gettile_l93_nok(self):
+        """Test conversion from an unidentified geometry file to
+            WMTS GetTile query parameters in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a WKT geometry
+            Output: WMTS GetTile query parameters
+        """
+        file_path = "file:///tmp/geom.unknown"
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "13",
+        }
+        bbox = (625000.00, 6532000.00, 645000.00, 6545000.00)
+        file_content = str(bbox)
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile")
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile), \
+                self.assertRaises(tms2stuff.GeometryError) as cm:
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_gettile.assert_not_called()
+        self.assertEqual(stdout_content, "", "unexpected console output")
+        self.assertRegex(str(cm.exception), "^Input geometry error in file.*",
+            "unexpected error message")
 
     def test_tile_to_getmap_pm_ok(self):
         """Test tile indices to GetMap conversion in the PM TMS.
