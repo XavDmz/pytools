@@ -1,3 +1,4 @@
+#!/bin/env python
 """Describes unit tests for the rok4_tools.tms2stuff executable module
 
 There is one test class for each tested functionnality.
@@ -169,6 +170,31 @@ class TestProcessingFunctions(TestCase):
         m_bbox_to_tiles.assert_called_once_with(bbox)
         self.assertEqual(result, expected)
 
+    def test_bbox_to_slab_list_ok(self):
+        """Nominal bbox_to_slab_list() call"""
+        bbox = (625000.89, 6532000.12, 680000.65, 6650000.25)
+        slab_size = (16, 10)
+        m_bbox_to_tiles = MagicMock(
+            name="bbox_to_tiles",
+            return_value=(95, 816, 103, 834)
+        )
+        self.m_tm.id = "13"
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        expected = [
+            (5, 81),
+            (5, 82),
+            (5, 83),
+            (6, 81),
+            (6, 82),
+            (6, 83),
+        ]
+
+        with patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
+            result = tms2stuff.bbox_to_slab_list(self.m_tm, bbox, slab_size)
+
+        m_bbox_to_tiles.assert_called_once_with(bbox)
+        self.assertEqual(result, expected)
+
 class TestMain(TestCase):
     """Test main() function"""
 
@@ -240,37 +266,36 @@ class TestMain(TestCase):
             Output: slab indices
         """
         level_id = "15"
-        m_bbox = (-19060337.37, 19644927.76, -19057891.39, 19647373.75)
-        m_bbox_to_tiles = MagicMock(
-            name="bbox_to_tiles",
-            return_value=(799, 319, 800, 321)
-        )
-        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
-        args = {
-            "tms_name": "PM",
-            "input": f"BBOX:{m_bbox[0]},{m_bbox[1]},{m_bbox[2]},{m_bbox[3]}",
-            "output": "SLAB_INDICES",
-            "level": "15",
-            "slabsize": "16x10",
-        }
-
-        with patch("sys.stdout", self.m_stdout), \
-                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c):
-            tms2stuff.main(args)
-
-        stdout_content = self.m_stdout.getvalue()
-        self.m_tms_c.assert_called_once_with(args["tms_name"])
-        self.m_tms_i.get_level.assert_called_once_with(args["level"])
-        expected_output = ""
+        bbox = (-19060337.37, 19644927.76, -19057891.39, 19647373.75)
+        slab_size = (16, 10)
         slabs_list = [
             (49, 31),
             (49, 32),
             (50, 31),
             (50, 32),
         ]
-        for pair in slabs_list:
-            pair_string = f"{pair[0]},{pair[1]}"
-            expected_output = expected_output + pair_string + "\n"
+        m_bbox_to_slab_list = MagicMock(name="bbox_to_slab_list",
+            return_value=slabs_list)
+        args = {
+            "tms_name": "PM",
+            "input": f"BBOX:{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
+            "output": "SLAB_INDICES",
+            "level": "15",
+            "slabsize": f"{slab_size[0]}x{slab_size[1]}",
+        }
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.bbox_to_slab_list", m_bbox_to_slab_list):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_bbox_to_slab_list.assert_called_once_with(self.m_tm, bbox, slab_size)
+        expected_output = ""
+        for slab in slabs_list:
+            expected_output = expected_output + f"{slab[0]},{slab[1]}\n"
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -285,6 +310,7 @@ class TestMain(TestCase):
             Output: slab indices
         """
         file_path = "s3://temporary/bbox_list.txt"
+        slab_size = (16, 10)
         bbox_list = [
             (-19060337.37, 19646150.75, -19059114.38, 19647373.75),
             (-19060337.37, 19644927.76, -19059114.38, 19646150.75),
@@ -294,36 +320,36 @@ class TestMain(TestCase):
             (-19827153.64, 19731760.22, -19825930.64, 19732983.22),
         ]
         list_content = ""
-        bbox_calls_list = []
+        calls_list = []
         for bbox in bbox_list:
             bbox_string = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
             list_content = list_content + bbox_string + "\n"
-            bbox_calls_list.append(call(bbox))
+            calls_list.append(call(self.m_tm, bbox, slab_size))
         m_get_data = MagicMock(name="get_data_str", return_value=list_content)
         m_exists = MagicMock(name="exists", return_value=True)
-        tiles_list = [
-            (799, 319, 800, 320),
-            (799, 320, 800, 321),
-            (799, 321, 800, 322),
-            (800, 319, 801, 322),
-            (165, 245, 166, 246),
-            (172, 249, 173, 250)
-        ]
-        m_bbox_to_tiles = MagicMock(name="bbox_to_tiles",
-            side_effect=tiles_list)
-        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
         args = {
             "tms_name": "PM",
             "input": f"BBOXES_LIST:{file_path}",
             "output": "SLAB_INDICES",
             "level": "15",
-            "slabsize": "16x10",
+            "slabsize": f"{slab_size[0]}x{slab_size[1]}",
         }
+        slab_intermediate_list = [
+            [(49, 31), (49, 32), (50, 31), (50, 32)],
+            [(49, 32), (50, 32)],
+            [(49, 32), (50, 32)],
+            [(50, 31), (50, 32)],
+            [(10, 24)],
+            [(10, 24), (10, 25)],
+        ]
+        m_bbox_to_slab_list = MagicMock(name="bbox_to_slab_list",
+            side_effect=slab_intermediate_list)
 
         with patch("sys.stdout", self.m_stdout), \
                 patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
                 patch(f"{self.mod}.exists", m_exists), \
-                patch(f"{self.mod}.get_data_str", m_get_data):
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_slab_list", m_bbox_to_slab_list):
             tms2stuff.main(args)
 
         stdout_content = self.m_stdout.getvalue()
@@ -331,7 +357,7 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        self.assertEqual(m_bbox_to_tiles.call_args_list, bbox_calls_list,
+        self.assertEqual(m_bbox_to_slab_list.call_args_list, calls_list,
             msg="Wrong calls to TileMatrix.bbox_to_tiles(bbox)")
         slabs_list = [
             (10,24),
@@ -342,9 +368,8 @@ class TestMain(TestCase):
             (50,32),
         ]
         expected_output = ""
-        for pair in slabs_list:
-            pair_string = f"{pair[0]},{pair[1]}"
-            expected_output = expected_output + pair_string + "\n"
+        for slab in slabs_list:
+            expected_output = expected_output + f"{slab[0]},{slab[1]}\n"
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -680,6 +705,65 @@ class TestMain(TestCase):
         self.assertEqual(stdout_content, "", "unexpected console output")
         self.assertRegex(str(cm.exception), "^Input geometry error in file.*",
             "unexpected error message")
+
+    def test_wkt_file_to_slabs_l93_ok(self):
+        """Test conversion from a WKT geometry file to slab indices
+        in the LAMB93_5cm TMS.
+
+        Characteristics:
+            TMS: LAMB93_5cm
+            Input: path to a existing file or object describing
+                a WKT geometry
+            Output: slab indices
+        """
+        file_path = "file:///tmp/geom.wkt"
+        slab_size = (16, 10)
+        args = {
+            "tms_name": "LAMB93_5cm",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "SLAB_INDICES",
+            "level": "13",
+            "slabsize": f"{slab_size[0]}x{slab_size[1]}",
+        }
+        bbox = (625000.89, 6532000.12, 680000.65, 6650000.25)
+        file_content = ("POLYGON(("
+            + f"{bbox[0]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[1]},"
+            + f"{bbox[2]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[3]},"
+            + f"{bbox[0]} {bbox[1]}"
+            + "))")
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        slabs_list = [
+            (5, 81),
+            (5, 82),
+            (5, 83),
+            (6, 81),
+            (6, 82),
+            (6, 83),
+        ]
+        m_bbox_to_slab_list = MagicMock(name="bbox_to_slab_list",
+            return_value=slabs_list)
+        expected_output = ""
+        for slab in slabs_list:
+            expected_output = expected_output + f"{slab[0]},{slab[1]}\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_slab_list", m_bbox_to_slab_list):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        m_bbox_to_slab_list.assert_called_once_with(self.m_tm, bbox, slab_size)
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
 
     def test_tile_to_getmap_pm_ok(self):
         """Test tile indices to GetMap conversion in the PM TMS.

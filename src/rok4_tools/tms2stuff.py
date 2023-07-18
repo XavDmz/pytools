@@ -116,6 +116,7 @@ def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float]
         List[str]: List of WMTS GetTile query string excerpts
             str: "TILEMATRIX=<level>&TILECOL=<col>&TILEROW=<row>"
     """
+    # tile_box = (min_col, min_row, max_col, max_row)
     tile_box = tm.bbox_to_tiles(bbox)
     query_list = []
     for column in range(tile_box[0], tile_box[2] + 1, 1):
@@ -123,6 +124,36 @@ def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float]
             query_list.append(f"TILEMATRIX={tm.id}&TILECOL={column}"
                 + f"&TILEROW={row}")
     return query_list
+
+def bbox_to_slab_list(tm: "TileMatrix",
+        bbox: Tuple[float, float, float, float],
+        slab_size: Tuple[int, int]) -> List[str]:
+    """Convert a bounding box (BBOX) to excerpts of GetTile queries.
+
+    Args:
+        tm (TileMatrix): target GetTile
+        bbox (Tuple[float, float, float, float]): BBOX as a tuple
+            (min_x, min_y, max_x, max_y)
+        slab_size (Tuple[int, int]): slab's number of tiles in width and
+            height respectively
+
+    Returns:
+        List[Tuple[int, int]]: List of slab (column, row) tuples
+    """
+    # tile_box = (min_col, min_row, max_col, max_row)
+    tile_box = tm.bbox_to_tiles(bbox)
+    # slab_box = (min_col, min_row, max_col, max_row)
+    slab_box = (
+        math.floor(tile_box[0] / slab_size[0]),
+        math.floor(tile_box[1] / slab_size[1]),
+        math.floor(tile_box[2] / slab_size[0]),
+        math.floor(tile_box[3] / slab_size[1])
+    )
+    slab_list = []
+    for column in range(slab_box[0], slab_box[2] + 1, 1):
+        for row in range(slab_box[1], slab_box[3] + 1, 1):
+            slab_list.append((column, row))
+    return slab_list
 
 # Custom exceptions
 
@@ -163,6 +194,7 @@ def main(args: Dict) -> None:
         ],
         "GEOM_FILE": [
             "GETTILE_PARAMS",
+            "SLAB_INDICES",
         ],
         "TILE_INDICE": [
             "GETMAP_PARAMS",
@@ -223,18 +255,9 @@ def main(args: Dict) -> None:
             if slab_size is None:
                 raise ValueError(f"For output type {output_parts[0]}, "
                     + "the parameter '--slabsize' is mandatory.")
-            # tile_box = (min_col, min_row, max_col, max_row)
-            tile_box = tm.bbox_to_tiles(bbox)
-            # slab_box = (min_col, min_row, max_col, max_row)
-            slab_box = (
-                math.floor(tile_box[0] / slab_size[0]),
-                math.floor(tile_box[1] / slab_size[1]),
-                math.floor(tile_box[2] / slab_size[0]),
-                math.floor(tile_box[3] / slab_size[1])
-            )
-            for slab_col in range(slab_box[0], slab_box[2] + 1, 1):
-                for slab_row in range(slab_box[1], slab_box[3] + 1, 1):
-                    print(slab_col, slab_row, sep=',')
+            slab_list = bbox_to_slab_list(tm, bbox, slab_size)
+            for slab in slab_list:
+                print(f"{slab[0]},{slab[1]}", end="\n")
 
     elif input_parts[0] == "BBOXES_LIST" and output_parts[0] == "SLAB_INDICES":
         # input = BBOX list file or object, output = slab indices
@@ -252,13 +275,10 @@ def main(args: Dict) -> None:
         slabs_list = []
         for bbox_string in bbox_list:
             bbox = read_bbox(bbox_string)
-            bbox_tiles = tm.bbox_to_tiles(bbox)
-            for tile_col in range(bbox_tiles[0], bbox_tiles[2] + 1, 1):
-                for tile_row in range(bbox_tiles[1], bbox_tiles[3] + 1, 1):
-                    slab = (math.floor(tile_col / slab_size[0]),
-                        math.floor(tile_row / slab_size[1]))
-                    if slab not in slabs_list:
-                        slabs_list.append(slab)
+            temp_slabs_list = bbox_to_slab_list(tm, bbox, slab_size)
+            for slab in temp_slabs_list:
+                if slab not in slabs_list:
+                    slabs_list.append(slab)
         slabs_list.sort()
         for slab in slabs_list:
             print(slab[0], slab[1], sep=',')
@@ -295,8 +315,17 @@ def main(args: Dict) -> None:
         bbox = (min_x, min_y, max_x, max_y)
 
         if output_parts[0] == "GETTILE_PARAMS":
+            # input = GEOM_FILE, output = WMTS GetTile query parameters
             gettile_list = bbox_to_gettile(tm, bbox)
             print("\n".join(gettile_list), end="\n")
+        elif output_parts[0] == "SLAB_INDICES":
+            # input = GEOM_FILE, output = slab indices
+            if slab_size is None:
+                raise ValueError(f"For output type {output_parts[0]}, "
+                    + "the parameter '--slabsize' is mandatory.")
+            slab_list = bbox_to_slab_list(tm, bbox, slab_size)
+            for slab in slab_list:
+                print(f"{slab[0]},{slab[1]}", end="\n")
 
     elif input_parts[0] == "TILE_INDICE":
         input_error_message = ("Syntax for tile indices input is: "
