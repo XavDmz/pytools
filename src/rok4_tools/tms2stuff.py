@@ -103,31 +103,46 @@ def read_bbox(bbox_str: str, error_message: str = None
 
 # Data processing functions
 
-def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float]
-        ) -> List[str]:
+def bbox_to_gettile(tm: "TileMatrix", bbox: Tuple[float, float, float, float],
+        container: ogr.Geometry = None) -> List[str]:
     """Convert a bounding box (BBOX) to excerpts of GetTile queries.
 
     Args:
         tm (TileMatrix): target GetTile
         bbox (Tuple[float, float, float, float]): BBOX as a tuple
             (min_x, min_y, max_x, max_y)
+        container (ogr.Geometry): geometry that tiles have to intersect
 
     Returns:
         List[str]: List of WMTS GetTile query string excerpts
             str: "TILEMATRIX=<level>&TILECOL=<col>&TILEROW=<row>"
     """
-    # tile_box = (min_col, min_row, max_col, max_row)
-    tile_box = tm.bbox_to_tiles(bbox)
+    # tile_range = (min_col, min_row, max_col, max_row)
+    tile_range = tm.bbox_to_tiles(bbox)
     query_list = []
-    for column in range(tile_box[0], tile_box[2] + 1, 1):
-        for row in range(tile_box[1], tile_box[3] + 1, 1):
-            query_list.append(f"TILEMATRIX={tm.id}&TILECOL={column}"
-                + f"&TILEROW={row}")
+    for column in range(tile_range[0], tile_range[2] + 1):
+        for row in range(tile_range[1], tile_range[3] + 1):
+            add_query = True
+            if container is not None:
+                tile_bbox = tm.tile_to_bbox(column, row)
+                tile_geom = ogr.Geometry(ogr.wkbPolygon)
+                ring = ogr.Geometry(ogr.wkbLinearRing)
+                ring.AddPoint(tile_bbox[0], tile_bbox[1])
+                ring.AddPoint(tile_bbox[2], tile_bbox[1])
+                ring.AddPoint(tile_bbox[2], tile_bbox[3])
+                ring.AddPoint(tile_bbox[0], tile_bbox[3])
+                ring.AddPoint(tile_bbox[0], tile_bbox[1])
+                tile_geom.AddGeometry(ring)
+                add_query = container.Intersects(tile_geom)
+            if add_query:
+                query_list.append(f"TILEMATRIX={tm.id}&TILECOL={column}"
+                    + f"&TILEROW={row}")
     return query_list
 
 def bbox_to_slab_list(tm: "TileMatrix",
         bbox: Tuple[float, float, float, float],
-        slab_size: Tuple[int, int]) -> List[str]:
+        slab_size: Tuple[int, int],
+        container: ogr.Geometry = None) -> List[str]:
     """Convert a bounding box (BBOX) to excerpts of GetTile queries.
 
     Args:
@@ -136,23 +151,55 @@ def bbox_to_slab_list(tm: "TileMatrix",
             (min_x, min_y, max_x, max_y)
         slab_size (Tuple[int, int]): slab's number of tiles in width and
             height respectively
+        container (ogr.Geometry): geometry that slabs have to intersect
 
     Returns:
         List[Tuple[int, int]]: List of slab (column, row) tuples
     """
-    # tile_box = (min_col, min_row, max_col, max_row)
-    tile_box = tm.bbox_to_tiles(bbox)
-    # slab_box = (min_col, min_row, max_col, max_row)
-    slab_box = (
-        math.floor(tile_box[0] / slab_size[0]),
-        math.floor(tile_box[1] / slab_size[1]),
-        math.floor(tile_box[2] / slab_size[0]),
-        math.floor(tile_box[3] / slab_size[1])
+    # tile_range = (min_col, min_row, max_col, max_row)
+    tile_range = tm.bbox_to_tiles(bbox)
+    # slab_range = (min_col, min_row, max_col, max_row)
+    slab_range = (
+        math.floor(tile_range[0] / slab_size[0]),
+        math.floor(tile_range[1] / slab_size[1]),
+        math.floor(tile_range[2] / slab_size[0]),
+        math.floor(tile_range[3] / slab_size[1])
     )
     slab_list = []
-    for column in range(slab_box[0], slab_box[2] + 1, 1):
-        for row in range(slab_box[1], slab_box[3] + 1, 1):
-            slab_list.append((column, row))
+    for column in range(slab_range[0], slab_range[2] + 1, 1):
+        for row in range(slab_range[1], slab_range[3] + 1, 1):
+            add_slab = True
+            if container is not None:
+                tile_col_range = range(column * slab_size[0],
+                    (column + 1) * slab_size[0])
+                tile_row_range = range(row * slab_size[1],
+                    (row + 1) * slab_size[1])
+                slab_bbox = []
+                for tile_col in tile_col_range:
+                    for tile_row in tile_row_range:
+                        tile_bbox = tm.tile_to_bbox(column, row)
+                        if len(slab_bbox) == 0:
+                            slab_bbox = list(tile_bbox)
+                        else:
+                            if slab_bbox[0] < tile_bbox[0]:
+                                slab_bbox[0] = tile_bbox[0]
+                            if slab_bbox[1] < tile_bbox[1]:
+                                slab_bbox[1] = tile_bbox[1]
+                            if slab_bbox[2] > tile_bbox[2]:
+                                slab_bbox[2] = tile_bbox[2]
+                            if slab_bbox[3] > tile_bbox[3]:
+                                slab_bbox[3] = tile_bbox[3]
+                slab_geom = ogr.Geometry(ogr.wkbPolygon)
+                ring = ogr.Geometry(ogr.wkbLinearRing)
+                ring.AddPoint(slab_bbox[0], slab_bbox[1])
+                ring.AddPoint(slab_bbox[2], slab_bbox[1])
+                ring.AddPoint(slab_bbox[2], slab_bbox[3])
+                ring.AddPoint(slab_bbox[0], slab_bbox[3])
+                ring.AddPoint(slab_bbox[0], slab_bbox[1])
+                slab_geom.AddGeometry(ring)
+                add_slab = container.Intersects(slab_geom)
+            if add_slab:
+                slab_list.append((column, row))
     return slab_list
 
 # Custom exceptions
@@ -292,16 +339,16 @@ def main(args: Dict) -> None:
                 f"File or object not found: {input_parts[1]}")
         geometry_str = get_data_str(input_parts[1])
         try:
-            geometry = ogr.CreateGeometryFromGML(geometry_str)
+            geometry_full = ogr.CreateGeometryFromGML(geometry_str)
         except (RuntimeError, TypeError):
             try:
-                geometry = ogr.CreateGeometryFromJson(geometry_str)
+                geometry_full = ogr.CreateGeometryFromJson(geometry_str)
             except (RuntimeError, TypeError):
                 try:
-                    geometry = ogr.CreateGeometryFromWkb(geometry_str)
+                    geometry_full = ogr.CreateGeometryFromWkb(geometry_str)
                 except (RuntimeError, TypeError):
                     try:
-                        geometry = ogr.CreateGeometryFromWkt(geometry_str)
+                        geometry_full = ogr.CreateGeometryFromWkt(geometry_str)
                     except (RuntimeError, TypeError):
                         raise GeometryError(
                             "Input geometry error in file '"
@@ -310,22 +357,36 @@ def main(args: Dict) -> None:
                             + "Handled formats are: "
                             + "GML, GeoJSON, WKB, WKT."
                         )
-
-        (min_x, max_x, min_y, max_y) = geometry.GetEnvelope()
-        bbox = (min_x, min_y, max_x, max_y)
-
+        if not geometry_full.IsValid():
+            raise GeometryError("Invalid input geometry. WKT description: '"
+                + geometry_full.ExportToWkt() + "'")
+        bbox_list = []
+        for part_index in range(geometry_full.GetGeometryCount()):
+            geometry_part = geometry_full.GetGeometryRef(part_index)
+            (min_x, max_x, min_y, max_y) = geometry_part.GetEnvelope()
+            bbox_list.append((min_x, min_y, max_x, max_y))
+        final_list = []
         if output_parts[0] == "GETTILE_PARAMS":
             # input = GEOM_FILE, output = WMTS GetTile query parameters
-            gettile_list = bbox_to_gettile(tm, bbox)
-            print("\n".join(gettile_list), end="\n")
+            for bbox in bbox_list:
+                gettile_list = bbox_to_gettile(tm, bbox, geometry_full)
+                for gettile in gettile_list:
+                    if gettile not in final_list:
+                        final_list.append(gettile)
         elif output_parts[0] == "SLAB_INDICES":
             # input = GEOM_FILE, output = slab indices
             if slab_size is None:
                 raise ValueError(f"For output type {output_parts[0]}, "
                     + "the parameter '--slabsize' is mandatory.")
-            slab_list = bbox_to_slab_list(tm, bbox, slab_size)
-            for slab in slab_list:
-                print(f"{slab[0]},{slab[1]}", end="\n")
+            for bbox in bbox_list:
+                slab_list = bbox_to_slab_list(tm, bbox, slab_size,
+                    geometry_full)
+                for slab in slab_list:
+                    slab_string = f"{slab[0]},{slab[1]}"
+                    if slab_string not in final_list:
+                        final_list.append(slab_string)
+        final_list.sort()
+        print("\n".join(final_list), end="\n")
 
     elif input_parts[0] == "TILE_INDICE":
         input_error_message = ("Syntax for tile indices input is: "

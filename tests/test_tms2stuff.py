@@ -13,6 +13,8 @@ import sys
 from unittest import mock, TestCase, skip
 from unittest.mock import call, MagicMock, Mock, mock_open, patch
 
+from osgeo import ogr
+
 from rok4_tools import tms2stuff
 
 
@@ -151,16 +153,16 @@ class TestProcessingFunctions(TestCase):
     def test_bbox_to_gettile_ok(self):
         """Nominal bbox_to_gettile() call"""
         bbox = (753363.55, 1688952.65, 757025.90, 1692621.45)
-        tile_box = (17000, 15000, 17002, 15002)
+        tile_range = (17000, 15000, 17002, 15002)
         m_bbox_to_tiles = MagicMock(
             name="bbox_to_tiles",
-            return_value=tile_box
+            return_value=tile_range
         )
         self.m_tm.id = "13"
         self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
         expected = []
-        for column in range(tile_box[0], tile_box[2] +1 , 1):
-            for row in range(tile_box[1], tile_box[3] +1 , 1):
+        for column in range(tile_range[0], tile_range[2] +1 , 1):
+            for row in range(tile_range[1], tile_range[3] +1 , 1):
                 expected.append(f"TILEMATRIX={self.m_tm.id}"
                     + f"&TILECOL={column}&TILEROW={row}")
 
@@ -168,6 +170,44 @@ class TestProcessingFunctions(TestCase):
             result = tms2stuff.bbox_to_gettile(self.m_tm, bbox)
 
         m_bbox_to_tiles.assert_called_once_with(bbox)
+        self.assertEqual(result, expected)
+
+    def test_bbox_to_gettile_intersection_ok(self):
+        """Nominal bbox_to_gettile() call"""
+        bbox = (63125978.43148272, -53356714.7204109, 
+            63140654.340913475, -53342038.81098014)
+        tile_range = (17000, 15000, 17002, 15002)
+        self.m_tm.id = "13"
+        m_bbox_to_tiles = MagicMock(
+            name="bbox_to_tiles",
+            return_value=tile_range
+        )
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        m_tile_to_bbox = MagicMock(name="tile_to_bbox", return_value=bbox)
+        self.m_tm.attach_mock(m_tile_to_bbox, 'tile_to_bbox')
+        reference = ogr.Geometry(ogr.wkbPolygon)
+        intersect_list = [True, True, True, True, True, False, True, False,
+            False]
+        m_intersects = MagicMock(
+            name="container.Intersects",
+            side_effect=intersect_list
+        )
+        expected = []
+        calls_list = []
+        for column in range(tile_range[0], tile_range[2] + 1):
+            for row in range(tile_range[1], tile_range[3] + 1):
+                calls_list.append(call(column, row))
+                if (column + row) <= (sum(tile_range)/2):
+                    expected.append(f"TILEMATRIX={self.m_tm.id}"
+                        + f"&TILECOL={column}&TILEROW={row}")
+
+        with patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch('ogr.Geometry.Intersects', m_intersects):
+            result = tms2stuff.bbox_to_gettile(self.m_tm, bbox, reference)
+
+        m_bbox_to_tiles.assert_called_once_with(bbox)
+        m_tile_to_bbox.assert_has_calls(calls_list)
+        self.assertEqual(m_intersects.call_count, 9)
         self.assertEqual(result, expected)
 
     def test_bbox_to_slab_list_ok(self):
@@ -193,6 +233,42 @@ class TestProcessingFunctions(TestCase):
             result = tms2stuff.bbox_to_slab_list(self.m_tm, bbox, slab_size)
 
         m_bbox_to_tiles.assert_called_once_with(bbox)
+        self.assertEqual(result, expected)
+
+    def test_bbox_to_slab_list_intersection_ok(self):
+        """Nominal bbox_to_slab_list() call"""
+        bbox = (625000.89, 6532000.12, 680000.65, 6650000.25)
+        slab_size = (16, 10)
+        self.m_tm.id = "13"
+        m_bbox_to_tiles = MagicMock(
+            name="bbox_to_tiles",
+            return_value=(95, 816, 103, 834)
+        )
+        self.m_tm.attach_mock(m_bbox_to_tiles, 'bbox_to_tiles')
+        m_tile_to_bbox = MagicMock(name="tile_to_bbox", return_value=bbox)
+        self.m_tm.attach_mock(m_tile_to_bbox, 'tile_to_bbox')
+        reference = ogr.Geometry(ogr.wkbPolygon)
+        intersect_list = [True, False, True, True, True, False]
+        m_intersects = MagicMock(
+            name="container.Intersects",
+            side_effect=intersect_list
+        )
+        calls_list = []
+        expected = [
+            (5, 81),
+            (5, 83),
+            (6, 81),
+            (6, 82),
+        ]
+
+        with patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch('ogr.Geometry.Intersects', m_intersects):
+            result = tms2stuff.bbox_to_slab_list(self.m_tm, bbox, slab_size,
+                reference)
+
+        m_bbox_to_tiles.assert_called_once_with(bbox)
+        m_tile_to_bbox.assert_has_calls(calls_list)
+        self.assertEqual(m_intersects.call_count, 6)
         self.assertEqual(result, expected)
 
 class TestMain(TestCase):
@@ -357,8 +433,7 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        self.assertEqual(m_bbox_to_slab_list.call_args_list, calls_list,
-            msg="Wrong calls to TileMatrix.bbox_to_tiles(bbox)")
+        m_bbox_to_slab_list.assert_has_calls(calls_list)
         slabs_list = [
             (10,24),
             (10,25),
@@ -430,7 +505,11 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        m_bbox_to_gettile.assert_called_once()
+        self.assertEqual(
+            m_bbox_to_gettile.call_args.args[0:2], (self.m_tm, bbox),
+            f"Unexpected arguments for call to bbox_to_gettile."
+        )
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -495,7 +574,11 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        m_bbox_to_gettile.assert_called_once()
+        self.assertEqual(
+            m_bbox_to_gettile.call_args.args[0:2], (self.m_tm, bbox),
+            f"Unexpected arguments for call to bbox_to_gettile."
+        )
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -559,7 +642,11 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        m_bbox_to_gettile.assert_called_once()
+        self.assertEqual(
+            m_bbox_to_gettile.call_args.args[0:2], (self.m_tm, bbox),
+            f"Unexpected arguments for call to bbox_to_gettile."
+        )
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -614,7 +701,11 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        m_bbox_to_gettile.assert_called_once_with(self.m_tm, bbox)
+        m_bbox_to_gettile.assert_called_once()
+        self.assertEqual(
+            m_bbox_to_gettile.call_args.args[0:2], (self.m_tm, bbox),
+            f"Unexpected arguments for call to bbox_to_gettile."
+        )
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
@@ -706,6 +797,115 @@ class TestMain(TestCase):
         self.assertRegex(str(cm.exception), "^Input geometry error in file.*",
             "unexpected error message")
 
+    def test_wkt_multi_to_gettile_pm_ok(self):
+        """Test conversion from a WKT multiple geometry file to
+            WMTS GetTile query parameters in the PM TMS.
+
+        Characteristics:
+            TMS: PM
+            Input: path to a existing file or object describing
+                a WKT multiple geometry
+            Output: WMTS GetTile query parameters
+        """
+        bbox_list = [
+            (-19059114.37, 19643704.77, -19057891.38, 19647373.75),
+            (-19060337.37, 19646150.75, -19059114.38, 19647373.75),
+            (-19060337.37, 19644927.76, -19059114.38, 19646150.74),
+            (-19060337.37, 19643704.77, -19059114.38, 19644927.75),
+            (-19835714.58, 19736652.19, -19834491.59, 19737875.19),
+            (-19827153.64, 19731760.22, -19825930.64, 19732983.22),
+        ]
+        file_path = "file:///tmp/geom.wkt"
+        args = {
+            "tms_name": "PM",
+            "input": f"GEOM_FILE:{file_path}",
+            "output": "GETTILE_PARAMS",
+            "level": "15",
+        }
+        calls_list = []
+        polygon_list = []
+        for i in range(len(bbox_list)):
+            bbox = bbox_list[i]
+            polygon = (
+                f"(({bbox[0]} {bbox[1]},"
+                + f"{bbox[2]} {bbox[1]},"
+                + f"{bbox[2]} {bbox[3]},"
+                + f"{bbox[0]} {bbox[3]},"
+                + f"{bbox[0]} {bbox[1]})"
+            )
+            if i == 0:
+                hole_bbox = (
+                    bbox[0] + 10.0,
+                    bbox[1] + 10.0,
+                    bbox[2] - 10.0,
+                    bbox[3] - 10.0
+                )
+                polygon = (
+                    polygon
+                    + f",({hole_bbox[0]} {hole_bbox[1]},"
+                    + f"{hole_bbox[2]} {hole_bbox[1]},"
+                    + f"{hole_bbox[2]} {hole_bbox[3]},"
+                    + f"{hole_bbox[0]} {hole_bbox[3]},"
+                    + f"{hole_bbox[0]} {hole_bbox[1]}))"
+                )
+            else:
+                polygon = polygon + ")"
+            polygon_list.append(polygon)
+            calls_list.append(call(self.m_tm, bbox))
+        file_content = "MULTIPOLYGON(" + ",".join(polygon_list) + ")"
+        m_get_data = MagicMock(name="get_data_str", return_value=file_content)
+        m_exists = MagicMock(name="exists", return_value=True)
+        tile_range_list = [
+            (800, 319, 801, 322),
+            (799, 319, 800, 320),
+            (799, 320, 800, 321),
+            (799, 321, 800, 322),
+            (165, 245, 166, 246),
+            (172, 249, 173, 250)
+        ]
+        query_group_list = []
+        query_output_list = []
+        query_base = "TILEMATRIX=" + args["level"]
+        for tile_range in tile_range_list:
+            query_list = []
+            for column in range(tile_range[0], tile_range[2] + 1):
+                for row in range(tile_range[1], tile_range[3] + 1):
+                    query = (f"{query_base}&TILECOL={column}&TILEROW={row}")
+                    query_list.append(query)
+                    if query not in query_output_list:
+                        query_output_list.append(query)
+            query_group_list.append(query_list)
+        query_output_list.sort()
+        m_bbox_to_gettile = MagicMock(name="bbox_to_gettile",
+            side_effect=query_group_list)
+        expected_output = "\n".join(query_output_list) + "\n"
+
+        with patch("sys.stdout", self.m_stdout), \
+                patch(f"{self.mod}.TileMatrixSet", self.m_tms_c), \
+                patch(f"{self.mod}.exists", m_exists), \
+                patch(f"{self.mod}.get_data_str", m_get_data), \
+                patch(f"{self.mod}.bbox_to_gettile", m_bbox_to_gettile):
+            tms2stuff.main(args)
+
+        stdout_content = self.m_stdout.getvalue()
+        query_group_string = ""
+        for query_group in query_group_list:
+            query_group_string = query_group_string + "\n".join(query_group) + "\n\n"
+        self.m_tms_c.assert_called_once_with(args["tms_name"])
+        self.m_tms_i.get_level.assert_called_once_with(args["level"])
+        m_exists.assert_called_once_with(file_path)
+        m_get_data.assert_called_once_with(file_path)
+        self.assertEqual(m_bbox_to_gettile.call_count, len(calls_list),
+            "Unexpected number of calls to bbox_to_gettile.")
+        for i in range(len(calls_list)):
+            self.assertEqual(
+                m_bbox_to_gettile.call_args_list[i].args[0:2],
+                calls_list[i].args[0:2],
+                f"Unexpected arguments for call {str(i)} to bbox_to_gettile."
+            )
+        self.assertEqual(stdout_content, expected_output,
+            "unexpected console output")
+
     def test_wkt_file_to_slabs_l93_ok(self):
         """Test conversion from a WKT geometry file to slab indices
         in the LAMB93_5cm TMS.
@@ -761,7 +961,9 @@ class TestMain(TestCase):
         self.m_tms_i.get_level.assert_called_once_with(args["level"])
         m_exists.assert_called_once_with(file_path)
         m_get_data.assert_called_once_with(file_path)
-        m_bbox_to_slab_list.assert_called_once_with(self.m_tm, bbox, slab_size)
+        m_bbox_to_slab_list.assert_called_once()
+        self.assertEqual(m_bbox_to_slab_list.call_args.args[0:3],
+            (self.m_tm, bbox, slab_size))
         self.assertEqual(stdout_content, expected_output,
             "unexpected console output")
 
